@@ -30,6 +30,51 @@ options = {
 ENV_FILE = ".env"
 completer_options = []
 
+def read_env_lines():
+    if os.path.isfile(ENV_FILE):
+        with open(ENV_FILE, "r", encoding="utf-8") as f:
+            return f.readlines()
+    return []
+
+def write_env_lines(lines):
+    with open(ENV_FILE, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+def update_client_configs_line(lines, client_configs):
+    new_line = f"CLIENT_CONFIGS={json.dumps(client_configs)}\n"
+    found = False
+    updated_lines = []
+    for line in lines:
+        if line.startswith("CLIENT_CONFIGS="):
+            if not found:
+                updated_lines.append(new_line)
+                found = True
+            continue
+        updated_lines.append(line)
+    if not found:
+        updated_lines.insert(0, new_line)
+    return updated_lines
+
+def set_env_values(lines, updates):
+    updated_lines = []
+    found_keys = {key: False for key in updates}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            updated_lines.append(line)
+            continue
+        key, _ = line.split("=", 1)
+        key = key.strip()
+        if key in updates:
+            updated_lines.append(f"{key}={updates[key]}\n")
+            found_keys[key] = True
+        else:
+            updated_lines.append(line)
+    for key, was_found in found_keys.items():
+        if not was_found:
+            updated_lines.append(f"{key}={updates[key]}\n")
+    return updated_lines
+
 def load_client_configs():
     client_configs = {}
     if os.path.isfile(ENV_FILE):
@@ -47,8 +92,9 @@ def load_client_configs():
     return client_configs
 
 def save_client_configs(client_configs):
-    with open(ENV_FILE, "w", encoding="utf-8") as f:
-        f.write(f"CLIENT_CONFIGS={json.dumps(client_configs)}\n")
+    lines = read_env_lines()
+    lines = update_client_configs_line(lines, client_configs)
+    write_env_lines(lines)
 
 def update_env_for_client(client_name, client_configs):
     config = client_configs.get(client_name)
@@ -56,30 +102,16 @@ def update_env_for_client(client_name, client_configs):
         print("Cliente não encontrado.")
         return False
 
-    # Carrega o conteúdo atual do .env para preservar CLIENT_CONFIGS
-    current_content = {}
-    if os.path.isfile(ENV_FILE):
-        with open(ENV_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("CLIENT_CONFIGS="):
-                    key, value = line.split("=", 1)
-                    current_content[key.strip()] = value.strip()
-
-    # Atualiza apenas as configurações ativas, mantendo CLIENT_CONFIGS
-    env_content = [
-        f"FALCON_CLIENT_ID={config['FALCON_CLIENT_ID']}",
-        f"FALCON_CLIENT_SECRET={config['FALCON_CLIENT_SECRET']}",
-        f"FALCON_BASE_URL={config['FALCON_BASE_URL']}",
-        f"CLIENT_NAME={client_name}",
-    ]
-    env_content.extend([f"{k}={v}" for k, v in current_content.items() if k not in ["FALCON_CLIENT_ID", "FALCON_CLIENT_SECRET", "FALCON_BASE_URL", "CLIENT_NAME"]])
-
-    # Regrava o .env com CLIENT_CONFIGS mantido
-    all_configs = load_client_configs()
-    with open(ENV_FILE, "w", encoding="utf-8") as f:
-        f.write(f"CLIENT_CONFIGS={json.dumps(all_configs)}\n")
-        f.write("\n".join(env_content))
+    lines = read_env_lines()
+    lines = update_client_configs_line(lines, client_configs)
+    updates = {
+        "FALCON_CLIENT_ID": config["FALCON_CLIENT_ID"],
+        "FALCON_CLIENT_SECRET": config["FALCON_CLIENT_SECRET"],
+        "FALCON_BASE_URL": config["FALCON_BASE_URL"],
+        "CLIENT_NAME": client_name,
+    }
+    lines = set_env_values(lines, updates)
+    write_env_lines(lines)
     return True
 
 def clear_screen():
@@ -258,9 +290,9 @@ def submenu_exportar(client_configs):
             print("⚠️ Opção inválida! Tente novamente.")
 
 def submenu_clientes():
-    client_configs = load_client_configs()
     clear_screen()
     while True:
+        client_configs = load_client_configs()
         print("===== MENU CLIENTES =====\n")
         print("1. Criar Cliente")
         print("2. Editar Cliente")
